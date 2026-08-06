@@ -134,31 +134,6 @@ static cbm_changed_symbol_t *br_find_changed_symbols(cbm_store_t *store,
 
 /* ── Impact Analysis ──────────────────────────────────────────────── */
 
-/* Find all upstream dependents of a symbol using BFS traversal. */
-static cbm_impacted_symbol_t *br_find_upstream_dependents(cbm_store_t *store,
-                                                           const char *project,
-                                                           const char *qualified_name,
-                                                           int max_depth,
-                                                           int *out_count) {
-    if (!store || !project || !qualified_name || !out_count) return NULL;
-    
-    *out_count = 0;
-    int cap = 64;
-    cbm_impacted_symbol_t *impacted = calloc(cap, sizeof(cbm_impacted_symbol_t));
-    if (!impacted) return NULL;
-    
-    /* Use BFS to find all callers, importers, etc. */
-    /* This would use cbm_store_bfs or similar traversal */
-    
-    /* For now, return empty - in production this would do BFS traversal */
-    (void)max_depth;
-    (void)store;
-    (void)project;
-    (void)qualified_name;
-    
-    return impacted;
-}
-
 /* Calculate impact score based on depth and fan-out. */
 float cbm_blast_radius_calculate_impact(cbm_store_t *store, const char *project,
                                          const char *qualified_name, int depth) {

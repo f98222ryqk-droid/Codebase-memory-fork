@@ -601,6 +601,32 @@ TEST(tree_cell_sanitizes_control_and_invalid_utf8) {
     PASS();
 }
 
+/* The canonical table header is the compact `key[N]: col1 col2` form
+ * (count inline after the key, no "(cols: ...)" prose, rows indented one
+ * space). This locks the token-tight shape in place — any regression to the
+ * older `key: N  (cols: ...)` two-space form is a per-response token tax with
+ * zero information gain. */
+TEST(tree_table_header_is_compact) {
+    cbm_sb_t sb;
+    cbm_sb_init(&sb);
+    static const char *const cols[] = {"qn", "label", "lines"};
+    cbm_tree_table_header(&sb, "results", 7, cols, 3);
+    cbm_tree_row_begin(&sb);
+    cbm_tree_cell_str(&sb, "pkg.foo", true);
+    cbm_tree_cell_str(&sb, "Function", false);
+    cbm_tree_cell_str(&sb, "10-20", false);
+    cbm_tree_row_end(&sb);
+    char *out = cbm_sb_finish(&sb);
+    ASSERT_NOT_NULL(out);
+    ASSERT_STR_EQ(out, "results[7]: qn label lines\n"
+                      " pkg.foo Function 10-20\n");
+    /* The old verbose header must never reappear. */
+    ASSERT_NULL(strstr(out, "(cols:"));
+    ASSERT_NULL(strstr(out, "(rows:"));
+    free(out);
+    PASS();
+}
+
 /* ══════════════════════════════════════════════════════════════════
  *  JSON-RPC PARSING
  * ══════════════════════════════════════════════════════════════════ */
@@ -1732,7 +1758,7 @@ TEST(tool_get_architecture_cycles_detects_scc) {
     ASSERT_NOT_NULL(resp);
     char *inner = extract_text_content(resp);
     ASSERT_NOT_NULL(inner);
-    ASSERT_NOT_NULL(strstr(inner, "cycles: 1")); /* exactly one SCC of size>1 */
+    ASSERT_NOT_NULL(strstr(inner, "cycles[1]:")); /* exactly one SCC of size>1 */
     ASSERT_NOT_NULL(strstr(inner, "cycproj.m.A"));
     ASSERT_NOT_NULL(strstr(inner, "cycproj.m.B"));
     ASSERT_NOT_NULL(strstr(inner, "cycproj.m.C"));
@@ -1833,8 +1859,8 @@ TEST(tool_search_graph_includes_node_properties) {
     ASSERT_NOT_NULL(strstr(resp, "\"structuredContent\":{\"text\":"));
     char *inner = extract_text_content(resp);
     ASSERT_NOT_NULL(inner);
-    ASSERT_NOT_NULL(strstr(inner, "results:")); /* TOON table header */
-    ASSERT_NOT_NULL(strstr(inner, "(rows: name label lines in out;"));
+    ASSERT_NOT_NULL(strstr(inner, "results[")); /* TOON table header */
+    ASSERT_NOT_NULL(strstr(inner, "results[1]: name label lines in out"));
     ASSERT_NOT_NULL(strstr(inner, "HandleRequest"));
     ASSERT_NULL(strstr(inner, "func HandleRequest")); /* signature not spilled */
     ASSERT_NULL(strstr(inner, "is_exported"));
@@ -1850,7 +1876,7 @@ TEST(tool_search_graph_includes_node_properties) {
     ASSERT_NOT_NULL(resp);
     inner = extract_text_content(resp);
     ASSERT_NOT_NULL(inner);
-    ASSERT_NOT_NULL(strstr(inner, "(rows: name label lines in out signature;"));
+    ASSERT_NOT_NULL(strstr(inner, "results[1]: name label lines in out signature"));
     /* values with spaces are QUOTED so column positions survive */
     ASSERT_NOT_NULL(strstr(inner, "\"func HandleRequest() error\""));
     ASSERT_NOT_NULL(strstr(inner, "func HandleRequest"));
@@ -1916,7 +1942,7 @@ TEST(tool_output_byte_budgets) {
     ASSERT_NOT_NULL(resp);
     inner = extract_text_content(resp);
     ASSERT_NOT_NULL(inner);
-    ASSERT_NOT_NULL(strstr(inner, "callees:"));
+    ASSERT_NOT_NULL(strstr(inner, "callees["));
     ASSERT_LT((int)strlen(inner), 800);
     free(inner);
     free(resp);
@@ -2128,7 +2154,7 @@ TEST(tool_output_regression_gate) {
         {"{\"jsonrpc\":\"2.0\",\"id\":70,\"method\":\"tools/call\",\"params\":{"
          "\"name\":\"search_graph\",\"arguments\":{\"project\":\"test-project\","
          "\"name_pattern\":\".*\",\"limit\":50}}}",
-         6000, "results:"},
+         6000, "results["},
         {"{\"jsonrpc\":\"2.0\",\"id\":71,\"method\":\"tools/call\",\"params\":{"
          "\"name\":\"get_graph_schema\",\"arguments\":{\"project\":\"test-project\"}}}",
          6000, "node_labels"},
@@ -2138,7 +2164,7 @@ TEST(tool_output_regression_gate) {
         {"{\"jsonrpc\":\"2.0\",\"id\":73,\"method\":\"tools/call\",\"params\":{"
          "\"name\":\"trace_call_path\",\"arguments\":{\"project\":\"test-project\","
          "\"function_name\":\"HandleRequest\",\"direction\":\"both\"}}}",
-         1500, "callees:"},
+         1500, "callees["},
     };
     for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
         const char *why = check_tool_output(srv, cases[i].req, cases[i].ceiling, cases[i].floor);
@@ -2723,8 +2749,8 @@ TEST(tool_trace_union_records_min_hop_across_seeds) {
     char *inner = extract_text_content(resp);
     ASSERT_NOT_NULL(inner);
     /* tgt is one hop from seed B — the union must record hop 1, not seed A's 2. */
-    ASSERT_NOT_NULL(strstr(inner, "  tgt 1"));
-    ASSERT_NULL(strstr(inner, "  tgt 2"));
+    ASSERT_NOT_NULL(strstr(inner, " tgt 1"));
+    ASSERT_NULL(strstr(inner, " tgt 2"));
     free(inner);
     free(resp);
     cbm_mcp_server_free(srv);
@@ -2815,7 +2841,7 @@ TEST(tool_trace_pagination_exactly_once) {
     /* Exactly-once: every callee appears on exactly ONE page. */
     for (int i = 0; i < CALLEES; i++) {
         char qn[48];
-        snprintf(qn, sizeof(qn), "  c%02d 1\n", i);
+        snprintf(qn, sizeof(qn), " c%02d 1\n", i);
         int seen = 0;
         for (int p = 0; p < 3; p++) {
             if (strstr(pages[p], qn)) {
@@ -3413,7 +3439,7 @@ TEST(tool_get_architecture_emits_populated_sections) {
      * those existed before #281. The "entry_points" array only appears
      * when cbm_store_get_architecture is actually called and its result
      * is serialized — which is exactly what #281 wires up. */
-    ASSERT_NOT_NULL(strstr(inner, "entry_points:"));
+    ASSERT_NOT_NULL(strstr(inner, "entry_points["));
     ASSERT_NOT_NULL(strstr(inner, "main"));
 
     free(inner);
@@ -3466,8 +3492,8 @@ TEST(tool_get_architecture_overview_compact_subset_pr560) {
     ASSERT_NOT_NULL(resp_all);
     char *inner_all = extract_text_content(resp_all);
     ASSERT_NOT_NULL(inner_all);
-    ASSERT_NOT_NULL(strstr(inner_all, "entry_points:"));
-    ASSERT_NOT_NULL(strstr(inner_all, "file_tree:"));
+    ASSERT_NOT_NULL(strstr(inner_all, "entry_points["));
+    ASSERT_NOT_NULL(strstr(inner_all, "file_tree["));
     free(inner_all);
     free(resp_all);
 
@@ -3480,9 +3506,9 @@ TEST(tool_get_architecture_overview_compact_subset_pr560) {
     ASSERT_NOT_NULL(resp);
     char *inner = extract_text_content(resp);
     ASSERT_NOT_NULL(inner);
-    ASSERT_NOT_NULL(strstr(inner, "entry_points:"));
-    ASSERT_NOT_NULL(strstr(inner, "node_labels:"));
-    ASSERT_NULL(strstr(inner, "file_tree:"));
+    ASSERT_NOT_NULL(strstr(inner, "entry_points["));
+    ASSERT_NOT_NULL(strstr(inner, "node_labels["));
+    ASSERT_NULL(strstr(inner, "file_tree["));
 
     free(inner);
     free(resp);
@@ -3563,7 +3589,7 @@ TEST(tool_get_architecture_accepts_project_name_alias_issue640) {
     /* RED before the alias: inner is the "project not found" error.
      * GREEN after: the alias resolves and architecture sections surface. */
     ASSERT_NULL(strstr(inner, "project not found"));
-    ASSERT_NOT_NULL(strstr(inner, "entry_points:"));
+    ASSERT_NOT_NULL(strstr(inner, "entry_points["));
 
     free(inner);
     free(resp);
@@ -10298,6 +10324,7 @@ SUITE(mcp) {
     RUN_TEST(jsonrpc_parse_notification);
     RUN_TEST(jsonrpc_parse_invalid);
     RUN_TEST(tree_cell_sanitizes_control_and_invalid_utf8);
+    RUN_TEST(tree_table_header_is_compact);
     RUN_TEST(jsonrpc_parse_tools_call);
     RUN_TEST(jsonrpc_parse_string_id_issue253);
     RUN_TEST(jsonrpc_format_response_string_id_issue253);

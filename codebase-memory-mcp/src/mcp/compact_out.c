@@ -242,23 +242,26 @@ void cbm_tree_scalar_bool(cbm_sb_t *sb, const char *key, bool v) {
 
 /* ── Tables ─────────────────────────────────────────────────────── */
 
-/* Tree-syntax table header: `key: N  (cols: a b c)` — count first (agents
- * read scale before rows), column names once, rows indented beneath. */
+/* Tree-syntax table header: `key[N]: a b c` — count inline after the key
+ * (agents read scale before rows), column names once, rows indented one
+ * space beneath. The bracket form replaces the older `key: N  (cols: a b c)`
+ * header, which burned ~7 bytes plus a parenthesized prose phrase on every
+ * table at zero information gain. */
 void cbm_tree_table_header(cbm_sb_t *sb, const char *key, int n, const char *const *cols,
                            int ncols) {
     char num[32];
-    snprintf(num, sizeof(num), ": %d  (cols:", n);
+    snprintf(num, sizeof(num), "[%d]:", n);
     cbm_sb_append(sb, key);
     cbm_sb_append(sb, num);
     for (int i = 0; i < ncols; i++) {
         cbm_sb_append_n(sb, " ", 1);
         cbm_sb_append(sb, cols[i]);
     }
-    cbm_sb_append_n(sb, ")\n", 2);
+    cbm_sb_append_n(sb, "\n", 1);
 }
 
 void cbm_tree_row_begin(cbm_sb_t *sb) {
-    cbm_sb_append_n(sb, "  ", 2);
+    cbm_sb_append_n(sb, " ", 1);
 }
 
 void cbm_tree_cell_str(cbm_sb_t *sb, const char *val, bool first) {

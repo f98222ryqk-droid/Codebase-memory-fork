@@ -25,6 +25,7 @@
 #include "store/store.h"
 #include "mcp/mcp.h"
 #include "pipeline/pipeline.h"
+#include "yyjson/yyjson.h"
 
 #include <ctype.h>
 #include <stdatomic.h>
