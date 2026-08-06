@@ -395,8 +395,8 @@ static const tool_def_t TOOLS[] = {
      "vector cosine search that bridges vocabulary (finds 'publish' when you search 'send'). "
      "The three modes are independent and can be combined in a single call. "
      "RESPONSE: prefix-grouped tree rows by default — a shared (qn-prefix, file) group "
-     "header printed once, then `name label lines in out` per row (full qn = group prefix "
-     "+ dot + name). in/out = selected degree across CALLS, USAGE, CALL_REFERENCE, "
+     "header printed once, then `name label lines in out` per row (qn=group.name). "
+     "in/out = selected degree across CALLS, USAGE, CALL_REFERENCE, "
      "INHERITS, and IMPLEMENTS; other edge types are excluded. These are NOT caller/callee "
      "counts — use trace_path for callers. Add per-node "
      "property columns via "
@@ -481,7 +481,7 @@ static const tool_def_t TOOLS[] = {
      "propagation with args at each hop), cross_service (through HTTP/async Route nodes). "
      "Use INSTEAD OF grep for callers, dependencies, impact analysis, or data flow tracing. "
      "RESPONSE: prefix-grouped tree rows — callees/callers grouped under their shared "
-     "qn-prefix, `name hop` per row (full qn = group prefix + dot + name); exact "
+     "qn-prefix, `name hop` per row (qn=group.name); exact "
      "callees_total/callers_total on every page = ALL nodes reachable within depth (transitive, "
      "not just direct; test files excluded unless include_tests). risk/args flags use a flat "
      "table. "
@@ -629,8 +629,7 @@ static const tool_def_t TOOLS[] = {
      "Map a git diff to its BLAST RADIUS. Resolves changed files to the symbols they define, then "
      "runs ONE multi-source graph traversal to the transitive impact set. RESPONSE: base + "
      "merge_base SHA, changed_files list, then impacted = prefix-grouped tree rows (name label "
-     "hop; "
-     "full qn = group prefix + dot + name) + an impacted_modules rollup; impacted_total + "
+     "hop; qn=group.name) + an impacted_modules rollup; impacted_total + "
      "truncated are exact. Seeds (the changed symbols) are excluded from impacted; a changed file "
      "reached from another changed file is not counted as extra impact. format=\"json\" returns "
      "the "
@@ -3313,8 +3312,7 @@ static void emit_search_results_tree(cbm_sb_t *sb, cbm_search_output_t *out, int
         strncat(extra_cols, " connected", sizeof(extra_cols) - strlen(extra_cols) - 1);
     }
     snprintf(buf, sizeof(buf),
-             "total: %d\nresults: %d  (rows: name label lines in out%s; "
-             "qn = group prefix + \".\" + name)\n",
+             "total: %d\nresults[%d]: name label lines in out%s (qn=group.name)\n",
              out->total, out->count, extra_cols);
     cbm_sb_append(sb, buf);
     /* Sort by qn so same-prefix rows are adjacent (module clustering). */
@@ -3338,7 +3336,7 @@ static void emit_search_results_tree(cbm_sb_t *sb, cbm_search_output_t *out, int
         char lines[CBM_SZ_32];
         sg_lines_str(lines, sizeof(lines), sr->node.start_line, sr->node.end_line);
         char row[CBM_SZ_1K];
-        snprintf(row, sizeof(row), "  %s %s %s %d %d", shortname,
+        snprintf(row, sizeof(row), " %s %s %s %d %d", shortname,
                  sr->node.label ? sr->node.label : "", lines, sr->in_degree, sr->out_degree);
         cbm_sb_append(sb, row);
         /* Extra property columns (fields param). Routed through the shared
@@ -5328,11 +5326,11 @@ static char *handle_get_architecture(cbm_mcp_server_t *srv, const char *args) {
                 }
                 char hdr[CBM_SZ_128];
                 snprintf(hdr, sizeof(hdr),
-                         "cycles: %d  (rows: size members; circular CALLS dependencies)\n", ncyc);
+                         "cycles[%d]: size members (circular CALLS dependencies)\n", ncyc);
                 cbm_sb_append(&sb, hdr);
                 for (int c = 0; c < ncyc; c++) {
                     char row[CBM_SZ_2K];
-                    int off = snprintf(row, sizeof(row), "  %d ", sizes[c]);
+                    int off = snprintf(row, sizeof(row), " %d ", sizes[c]);
                     bool clipped = sizes[c] > ARCH_SCC_MEMBERS_SHOWN;
                     int show = clipped ? ARCH_SCC_MEMBERS_SHOWN : sizes[c];
                     for (int m = 0; m < show && off < (int)sizeof(row) - 2; m++) {
@@ -6240,10 +6238,8 @@ static void bfs_to_tree_table(cbm_sb_t *sb, const char *key, cbm_traverse_result
     }
     char buf[CBM_SZ_256];
     snprintf(buf, sizeof(buf),
-             include_evidence
-                 ? "%s: %d  (rows: name hop strategy confidence; qn = group prefix + \".\" + "
-                   "name)\n"
-                 : "%s: %d  (rows: name hop; qn = group prefix + \".\" + name)\n",
+             include_evidence ? "%s[%d]: name hop strategy confidence (qn=group.name)\n"
+                              : "%s[%d]: name hop (qn=group.name)\n",
              key, visible);
     cbm_sb_append(sb, buf);
     if (tr->visited_count > 1) {
@@ -6271,20 +6267,20 @@ static void bfs_to_tree_table(cbm_sb_t *sb, const char *key, cbm_traverse_result
         if (include_evidence &&
             bfs_edge_evidence_for_hop(tr, tr->visited[i].node.id, &ev_class, &ev_conf)) {
             if (ev_conf >= 0.0) {
-                snprintf(row, sizeof(row), "  %s %d %s %.2f\n", plen ? qn + plen + 1 : qn,
+                snprintf(row, sizeof(row), " %s %d %s %.2f\n", plen ? qn + plen + 1 : qn,
                          tr->visited[i].hop, ev_class, ev_conf);
             } else {
-                snprintf(row, sizeof(row), "  %s %d %s -\n", plen ? qn + plen + 1 : qn,
+                snprintf(row, sizeof(row), " %s %d %s -\n", plen ? qn + plen + 1 : qn,
                          tr->visited[i].hop, ev_class);
             }
         } else if (include_evidence) {
             /* The root hop has no inbound edge, and non-CALLS edges record no
              * strategy. Emit placeholders so the column count stays fixed —
              * a ragged table is worse to parse than an explicit "-". */
-            snprintf(row, sizeof(row), "  %s %d - -\n", plen ? qn + plen + 1 : qn,
+            snprintf(row, sizeof(row), " %s %d - -\n", plen ? qn + plen + 1 : qn,
                      tr->visited[i].hop);
         } else {
-            snprintf(row, sizeof(row), "  %s %d\n", plen ? qn + plen + 1 : qn, tr->visited[i].hop);
+            snprintf(row, sizeof(row), " %s %d\n", plen ? qn + plen + 1 : qn, tr->visited[i].hop);
         }
         cbm_sb_append(sb, row);
     }
@@ -10083,8 +10079,7 @@ static void detect_emit_impacted_tree(cbm_sb_t *sb, cbm_traverse_result_t *tr, i
      * the visited array is already (hop,id)-ordered from the BFS. */
     char hdr[CBM_SZ_128];
     snprintf(hdr, sizeof(hdr),
-             "impacted_shown: %d\nimpacted: %d  (rows: name label hop; qn = group prefix + \".\" "
-             "+ name; nearest hops first)\n",
+             "impacted_shown: %d\nimpacted[%d]: name label hop (qn=group.name; nearest first)\n",
              shown, shown);
     cbm_sb_append(sb, hdr);
     if (shown > 1) {
@@ -10104,7 +10099,7 @@ static void detect_emit_impacted_tree(cbm_sb_t *sb, cbm_traverse_result_t *tr, i
             cbm_sb_append(sb, ":\n");
         }
         char row[CBM_SZ_512];
-        snprintf(row, sizeof(row), "  %s %s %d\n", plen ? qn + plen + 1 : qn,
+        snprintf(row, sizeof(row), " %s %s %d\n", plen ? qn + plen + 1 : qn,
                  tr->visited[i].node.label ? tr->visited[i].node.label : "", tr->visited[i].hop);
         cbm_sb_append(sb, row);
     }
@@ -10492,7 +10487,7 @@ static char *handle_detect_changes(cbm_mcp_server_t *srv, const char *args) {
         snprintf(cf, sizeof(cf), "changed_files: %d\n", file_count);
         cbm_sb_append(&sb, cf);
         for (int i = 0; i < file_count; i++) {
-            cbm_sb_append(&sb, "  ");
+            cbm_sb_append(&sb, " ");
             cbm_sb_append(&sb, files[i]);
             cbm_sb_append(&sb, "\n");
         }
@@ -10501,7 +10496,7 @@ static char *handle_detect_changes(cbm_mcp_server_t *srv, const char *args) {
             detect_emit_impacted_tree(&sb, &impact, imp_limit);
             /* module rollup: a quotient view of the blast radius */
             if (impact.visited_count > 0) {
-                cbm_sb_append(&sb, "impacted_modules: (rows: module count)\n");
+                cbm_sb_append(&sb, "impacted_modules: module count\n");
                 char (*mods)[CBM_SZ_128] = malloc(DETECT_MODCAP * CBM_SZ_128);
                 int *mcnt = malloc(DETECT_MODCAP * sizeof(int));
                 if (mods && mcnt) {
@@ -10509,12 +10504,12 @@ static char *handle_detect_changes(cbm_mcp_server_t *srv, const char *args) {
                     int nmods = detect_module_rollup(&impact, mods, mcnt, &overflow);
                     for (int j = 0; j < nmods; j++) {
                         char mrow[CBM_SZ_256];
-                        snprintf(mrow, sizeof(mrow), "  %s %d\n", mods[j], mcnt[j]);
+                        snprintf(mrow, sizeof(mrow), " %s %d\n", mods[j], mcnt[j]);
                         cbm_sb_append(&sb, mrow);
                     }
                     if (overflow > 0) {
                         char orow[CBM_SZ_128];
-                        snprintf(orow, sizeof(orow), "  (other) %d\n", overflow);
+                        snprintf(orow, sizeof(orow), " (other) %d\n", overflow);
                         cbm_sb_append(&sb, orow);
                     }
                 }
