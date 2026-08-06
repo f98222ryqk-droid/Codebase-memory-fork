@@ -48,6 +48,7 @@ private/
 build/
 node_modules/
 graph-ui/dist/
+*.tsbuildinfo
 
 # Generated reports
 BENCHMARK_REPORT.md
