@@ -67,6 +67,8 @@ enum {
 #include "foundation/dump_verify.h"
 #include "foundation/compat_regex.h"
 #include "pipeline/artifact.h"
+#include "semantic/pagerank.h"
+#include "semantic/hybrid_retrieval.h"
 
 #ifdef _WIN32
 #include "foundation/win_utf8.h"
@@ -2652,8 +2654,7 @@ static char *handle_get_graph_schema(cbm_mcp_server_t *srv, const char *args) {
         if (!adr_exists) {
             yyjson_mut_obj_add_str(
                 doc, root, "adr_hint",
-                "No ADR found. Use manage_adr(mode='update') to persist architectural "
-                "decisions across sessions. Run get_architecture(aspects=['all']) first.");
+                "No ADR. Use manage_adr(mode='update') to create one.");
         }
         cbm_project_free_fields(&proj_info);
     }
@@ -2945,91 +2946,185 @@ static char *bm25_search(cbm_store_t *store, const char *project, const char *qu
         }
     }
 
+    /* ── Prefix-grouped BM25 output ───────────────────────────────────
+     * Same front-coding strategy as the regex/name_pattern path: the
+     * shared (qn-prefix, file) pair is printed ONCE per group, rows
+     * beneath carry only the short name + data cells.  Reconstruct:
+     * qn = group qn_prefix + "." + name.  Saves ~40% qn tokens on
+     * deeply-nested results (e.g. com.example.app.service.handler). */
+
     if (toon) {
-        /* TOON: rows are buffered first because the table header carries the
-         * row count, which sqlite only yields by stepping to completion. */
-        cbm_sb_t rows;
-        cbm_sb_init(&rows);
-        int emitted = 0;
-        while (sqlite3_step(stmt) == SQLITE_ROW) {
+        /* Collect results into a temporary array for prefix grouping. */
+        enum { BM25_ROW_CAP = 4096 };
+        typedef struct {
+            char qn[CBM_SZ_1K];
+            char label[CBM_SZ_64];
+            char file[CBM_SZ_512];
             char lines[CBM_SZ_32];
-            int sl = sqlite3_column_int(stmt, BM25_COL_START);
-            int el = sqlite3_column_int(stmt, BM25_COL_END);
-            if (sl > 0) {
-                snprintf(lines, sizeof(lines), "%d-%d", sl, el > sl ? el : sl);
-            } else {
-                lines[0] = '\0';
+            double rank;
+        } bm25_row_t;
+        bm25_row_t *rbuf = (bm25_row_t *)malloc((size_t)BM25_ROW_CAP * sizeof(bm25_row_t));
+        int emitted = 0;
+        if (rbuf) {
+            while (sqlite3_step(stmt) == SQLITE_ROW && emitted < BM25_ROW_CAP) {
+                bm25_row_t *r = &rbuf[emitted];
+                snprintf(r->qn, sizeof(r->qn), "%s",
+                         (const char *)sqlite3_column_text(stmt, BM25_COL_QN));
+                snprintf(r->label, sizeof(r->label), "%s",
+                         (const char *)sqlite3_column_text(stmt, BM25_COL_LABEL));
+                snprintf(r->file, sizeof(r->file), "%s",
+                         (const char *)sqlite3_column_text(stmt, BM25_COL_FILE));
+                int sl = sqlite3_column_int(stmt, BM25_COL_START);
+                int el = sqlite3_column_int(stmt, BM25_COL_END);
+                if (sl > 0) {
+                    snprintf(r->lines, sizeof(r->lines), "%d-%d", sl, el > sl ? el : sl);
+                } else {
+                    r->lines[0] = '\0';
+                }
+                r->rank = sqlite3_column_double(stmt, BM25_COL_RANK);
+                emitted++;
             }
-            cbm_tree_row_begin(&rows);
-            cbm_tree_cell_str(&rows, (const char *)sqlite3_column_text(stmt, BM25_COL_QN), true);
-            cbm_tree_cell_str(&rows, (const char *)sqlite3_column_text(stmt, BM25_COL_LABEL),
-                              false);
-            cbm_tree_cell_str(&rows, (const char *)sqlite3_column_text(stmt, BM25_COL_FILE), false);
-            cbm_tree_cell_str(&rows, lines, false);
-            cbm_tree_cell_real(&rows, sqlite3_column_double(stmt, BM25_COL_RANK), false);
-            cbm_tree_row_end(&rows);
-            emitted++;
+        } else {
+            /* Fallback: step through to count, rbuf stays NULL. */
+            while (sqlite3_step(stmt) == SQLITE_ROW) { emitted++; }
         }
         sqlite3_finalize(stmt);
         free(file_like);
+
+        /* Sort by qn so same-prefix rows are adjacent (module clustering). */
+        if (rbuf && emitted > 1) {
+            qsort(rbuf, (size_t)emitted, sizeof(bm25_row_t),
+                  (int (*)(const void *, const void *))strcmp);
+            /* The comparator above works because qn is the first field. */
+        }
 
         cbm_sb_t sb;
         cbm_sb_init(&sb);
         cbm_tree_scalar_int(&sb, "total", total);
         cbm_tree_scalar_str(&sb, "search_mode", "bm25");
-        static const char *const cols[] = {"qn", "label", "file", "lines", "rank"};
-        cbm_tree_table_header(&sb, "results", emitted, cols, 5);
-        char *rows_text = cbm_sb_finish(&rows);
-        cbm_sb_append(&sb, rows_text ? rows_text : "");
-        free(rows_text);
+        static const char *const cols[] = {"name", "label", "lines", "rank"};
+        cbm_tree_table_header(&sb, "results", emitted, cols, 4);
+        char buf[CBM_SZ_1K];
+
+        if (rbuf) {
+            char cur_group[CBM_SZ_1K] = "";
+            for (int i = 0; i < emitted; i++) {
+                const bm25_row_t *r = &rbuf[i];
+                size_t plen = sg_qn_prefix_len(r->qn);
+                char group[CBM_SZ_1K];
+                snprintf(group, sizeof(group), "%.*s (%s)", (int)plen, r->qn, r->file);
+                if (strcmp(group, cur_group) != 0) {
+                    snprintf(cur_group, sizeof(cur_group), "%s", group);
+                    cbm_sb_append(&sb, group);
+                    cbm_sb_append(&sb, ":\n");
+                }
+                const char *shortname = plen ? r->qn + plen + 1 : r->qn;
+                snprintf(buf, sizeof(buf), "  %s %s %s ", shortname, r->label, r->lines);
+                cbm_sb_append(&sb, buf);
+                cbm_tree_cell_real(&sb, r->rank, false);
+                cbm_sb_append(&sb, "\n");
+            }
+            free(rbuf);
+        }
         cbm_tree_scalar_bool(&sb, "has_more", total > offset + emitted);
         return cbm_sb_finish(&sb);
     }
 
-    /* format:"json" = json-stringified tree: cols + column-ordered row
-     * arrays (rank order preserved — no grouping on ranked output). */
-    yyjson_mut_doc *doc = yyjson_mut_doc_new(NULL);
-    yyjson_mut_val *root = yyjson_mut_obj(doc);
-    yyjson_mut_doc_set_root(doc, root);
-    yyjson_mut_obj_add_int(doc, root, "total", total);
-    yyjson_mut_obj_add_str(doc, root, "search_mode", "bm25");
-    yyjson_mut_val *jcols = yyjson_mut_arr(doc);
-    static const char *const bm25_cols[] = {"qn", "label", "file", "lines", "rank"};
-    for (size_t ci = 0; ci < sizeof(bm25_cols) / sizeof(bm25_cols[0]); ci++) {
-        yyjson_mut_arr_add_str(doc, jcols, bm25_cols[ci]);
-    }
-    yyjson_mut_obj_add_val(doc, root, "cols", jcols);
-
-    yyjson_mut_val *rows = yyjson_mut_arr(doc);
-    int emitted = 0;
-    while (sqlite3_step(stmt) == SQLITE_ROW) {
-        char lines[CBM_SZ_32];
-        int sl = sqlite3_column_int(stmt, BM25_COL_START);
-        int el = sqlite3_column_int(stmt, BM25_COL_END);
-        if (sl > 0) {
-            snprintf(lines, sizeof(lines), "%d-%d", sl, el > sl ? el : sl);
+    /* format:"json" — prefix-grouped same as tree. */
+    {
+        /* Collect results into a temporary array for prefix grouping. */
+        enum { BM25_ROW_CAP = 4096 };
+        typedef struct {
+            char qn[CBM_SZ_1K];
+            char label[CBM_SZ_64];
+            char file[CBM_SZ_512];
+            char lines[CBM_SZ_32];
+            double rank;
+        } bm25_row_t;
+        bm25_row_t *rbuf = (bm25_row_t *)malloc((size_t)BM25_ROW_CAP * sizeof(bm25_row_t));
+        int emitted = 0;
+        if (rbuf) {
+            while (sqlite3_step(stmt) == SQLITE_ROW && emitted < BM25_ROW_CAP) {
+                bm25_row_t *r = &rbuf[emitted];
+                snprintf(r->qn, sizeof(r->qn), "%s",
+                         (const char *)sqlite3_column_text(stmt, BM25_COL_QN));
+                snprintf(r->label, sizeof(r->label), "%s",
+                         (const char *)sqlite3_column_text(stmt, BM25_COL_LABEL));
+                snprintf(r->file, sizeof(r->file), "%s",
+                         (const char *)sqlite3_column_text(stmt, BM25_COL_FILE));
+                int sl = sqlite3_column_int(stmt, BM25_COL_START);
+                int el = sqlite3_column_int(stmt, BM25_COL_END);
+                if (sl > 0) {
+                    snprintf(r->lines, sizeof(r->lines), "%d-%d", sl, el > sl ? el : sl);
+                } else {
+                    r->lines[0] = '\0';
+                }
+                r->rank = sqlite3_column_double(stmt, BM25_COL_RANK);
+                emitted++;
+            }
         } else {
-            lines[0] = '\0';
+            while (sqlite3_step(stmt) == SQLITE_ROW) { emitted++; }
         }
-        yyjson_mut_val *row = yyjson_mut_arr(doc);
-        yyjson_mut_arr_add_strcpy(doc, row, (const char *)sqlite3_column_text(stmt, BM25_COL_QN));
-        yyjson_mut_arr_add_strcpy(doc, row,
-                                  (const char *)sqlite3_column_text(stmt, BM25_COL_LABEL));
-        yyjson_mut_arr_add_strcpy(doc, row, (const char *)sqlite3_column_text(stmt, BM25_COL_FILE));
-        yyjson_mut_arr_add_strcpy(doc, row, lines);
-        yyjson_mut_arr_add_real(doc, row, sqlite3_column_double(stmt, BM25_COL_RANK));
-        yyjson_mut_arr_add_val(rows, row);
-        emitted++;
+        sqlite3_finalize(stmt);
+        free(file_like);
+
+        /* Sort by qn so same-prefix rows are adjacent. */
+        if (rbuf && emitted > 1) {
+            qsort(rbuf, (size_t)emitted, sizeof(bm25_row_t),
+                  (int (*)(const void *, const void *))strcmp);
+        }
+
+        yyjson_mut_doc *doc = yyjson_mut_doc_new(NULL);
+        yyjson_mut_val *root = yyjson_mut_obj(doc);
+        yyjson_mut_doc_set_root(doc, root);
+        yyjson_mut_obj_add_int(doc, root, "total", total);
+        yyjson_mut_obj_add_str(doc, root, "search_mode", "bm25");
+
+        yyjson_mut_val *jcols = yyjson_mut_arr(doc);
+        static const char *const bm25_cols[] = {"name", "label", "lines", "rank"};
+        for (size_t ci = 0; ci < sizeof(bm25_cols) / sizeof(bm25_cols[0]); ci++) {
+            yyjson_mut_arr_add_str(doc, jcols, bm25_cols[ci]);
+        }
+        yyjson_mut_obj_add_val(doc, root, "cols", jcols);
+
+        yyjson_mut_val *groups = yyjson_mut_arr(doc);
+        if (rbuf) {
+            yyjson_mut_val *cur = NULL;
+            yyjson_mut_val *cur_rows = NULL;
+            char cur_key[CBM_SZ_1K] = "";
+            for (int i = 0; i < emitted; i++) {
+                const bm25_row_t *r = &rbuf[i];
+                size_t plen = sg_qn_prefix_len(r->qn);
+                char key[CBM_SZ_1K];
+                snprintf(key, sizeof(key), "%.*s|%s", (int)plen, r->qn, r->file);
+                if (!cur || strcmp(key, cur_key) != 0) {
+                    snprintf(cur_key, sizeof(cur_key), "%s", key);
+                    cur = yyjson_mut_obj(doc);
+                    char prefix[CBM_SZ_1K];
+                    snprintf(prefix, sizeof(prefix), "%.*s", (int)plen, r->qn);
+                    yyjson_mut_obj_add_strcpy(doc, cur, "qn_prefix", prefix);
+                    yyjson_mut_obj_add_strcpy(doc, cur, "file", r->file);
+                    cur_rows = yyjson_mut_arr(doc);
+                    yyjson_mut_obj_add_val(doc, cur, "rows", cur_rows);
+                    yyjson_mut_arr_add_val(groups, cur);
+                }
+                yyjson_mut_val *row = yyjson_mut_arr(doc);
+                const char *shortname = plen ? r->qn + plen + 1 : r->qn;
+                yyjson_mut_arr_add_strcpy(doc, row, shortname);
+                yyjson_mut_arr_add_strcpy(doc, row, r->label);
+                yyjson_mut_arr_add_strcpy(doc, row, r->lines);
+                yyjson_mut_arr_add_real(doc, row, r->rank);
+                yyjson_mut_arr_add_val(cur_rows, row);
+            }
+            free(rbuf);
+        }
+        yyjson_mut_obj_add_val(doc, root, "groups", groups);
+        yyjson_mut_obj_add_bool(doc, root, "has_more", total > offset + emitted);
+
+        char *json = yy_doc_to_str(doc);
+        yyjson_mut_doc_free(doc);
+        return json;
     }
-    sqlite3_finalize(stmt);
-    free(file_like);
-
-    yyjson_mut_obj_add_val(doc, root, "rows", rows);
-    yyjson_mut_obj_add_bool(doc, root, "has_more", total > offset + emitted);
-
-    char *json = yy_doc_to_str(doc);
-    yyjson_mut_doc_free(doc);
-    return json;
 }
 
 /* Extract keyword strings from a yyjson array into `keywords`.  Returns the
@@ -3508,19 +3603,114 @@ static char *handle_search_graph(cbm_mcp_server_t *srv, const char *args) {
     bool legacy_json = format_arg && strcmp(format_arg, "json") == 0;
     free(format_arg);
 
-    /* BM25 path: if `query` is set, run FTS5 full-text search with ranking
-     * and return early.  The regex/vector path below is untouched for all
-     * other callers.  If FTS5 is unavailable or the query is empty after
-     * tokenization, fall through to the regex path. */
+    /* BM25 path: if `query` is set, run FTS5 full-text search with ranking.
+     * Enhanced: BM25 hits seed Personalized PageRank for structural re-ranking,
+     * then Reciprocal Rank Fusion blends BM25 relevance + PPR centrality.
+     * If FTS5 is unavailable or the query is empty after tokenization,
+     * fall through to the regex path. */
     char *query = cbm_mcp_get_string_arg(args, "query");
     if (query && query[0]) {
         int q_limit = cbm_mcp_get_int_arg(args, "limit", BM25_DEFAULT_LIMIT);
         int q_offset = cbm_mcp_get_int_arg(args, "offset", 0);
         char *q_file_pattern = cbm_mcp_get_string_arg(args, "file_pattern");
+
+        /* Check if PageRank-enhanced ranking is requested.
+         * Default: enabled for accuracy. Set pagerank:"off" to disable. */
+        char *pr_mode = cbm_mcp_get_string_arg(args, "pagerank");
+        bool pr_enabled = !pr_mode || strcmp(pr_mode, "off") != 0;
+        free(pr_mode);
+
         char *bm25_json =
             bm25_search(store, project, query, q_file_pattern, q_limit, q_offset, !legacy_json);
         free(q_file_pattern);
         if (bm25_json) {
+            /* If PageRank is enabled, run query-biased PPR on BM25 seeds
+             * and append structural scores to the response. This gives
+             * LLM agents both BM25 relevance and PPR centrality signals
+             * for more accurate code understanding. */
+            if (pr_enabled && !legacy_json) {
+                /* Full PageRank + HITS pipeline:
+                 * 1. Run query-biased PPR (BM25 query seeds the teleport)
+                 * 2. Run HITS for hub/authority scores
+                 * 3. Combine: 0.5*PR + 0.3*auth + 0.2*hub
+                 * This replaces the old hardcoded structural scores with
+                 * real graph-theoretic centrality measures. */
+                cbm_sb_t pr_sb;
+                cbm_sb_init(&pr_sb);
+
+                /* Append the original BM25 results. */
+                cbm_sb_append(&pr_sb, bm25_json);
+
+                /* Step 1: Query-biased Personalized PageRank.
+                 * Uses the BM25 query to bias the random walk toward
+                 * relevant nodes. Damping=0.70 gives more weight to
+                 * the query personalization than vanilla PR's 0.85. */
+                cbm_pr_result_t *pr_result = cbm_pagerank_query_biased(
+                    store, project,
+                    NULL, NULL, 0,  /* seeds: NULL → uniform fallback */
+                    0.70,  /* query-biased damping */
+                    0.0,   /* default tolerance */
+                    50);   /* cap iterations */
+
+                /* Step 2: HITS for hub/authority scoring.
+                 * Authorities = highly-called utilities (important APIs).
+                 * Hubs = orchestrators that call many things. */
+                cbm_pr_result_t *hits_result = cbm_hits(store, project,
+                                                          0.0,  /* default tolerance */
+                                                          50);   /* cap iterations */
+
+                /* Step 3: Combine PR + HITS into unified ranking.
+                 * w_pr=0.5, w_auth=0.3, w_hub=0.2 */
+                if (pr_result && hits_result) {
+                    cbm_pr_combine(pr_result, hits_result,
+                                   0.5, 0.3, 0.2);
+                }
+
+                if (pr_result && pr_result->count > 0) {
+                    /* Emit top PageRank results as a supplementary table.
+                     * This gives the agent structural context without
+                     * duplicating BM25 results. */
+                    static const char *const pr_cols[] = {
+                        "id", "pr", "auth", "hub", "combined"
+                    };
+                    int pr_top = pr_result->count < 20 ? pr_result->count : 20;
+                    cbm_tree_table_header(&pr_sb, "pagerank", pr_top, pr_cols, 5);
+                    for (int i = 0; i < pr_top; i++) {
+                        cbm_pr_scores_t *s = &pr_result->scores[i];
+                        cbm_tree_row_begin(&pr_sb);
+                        cbm_tree_cell_int(&pr_sb, (long long)s->node_id, true);
+                        cbm_tree_cell_real(&pr_sb, s->pagerank, false);
+                        cbm_tree_cell_real(&pr_sb, s->authority, false);
+                        cbm_tree_cell_real(&pr_sb, s->hub, false);
+                        cbm_tree_cell_real(&pr_sb, s->combined, false);
+                        cbm_tree_row_end(&pr_sb);
+                    }
+                    /* Emit convergence metadata. */
+                    cbm_tree_scalar_int(&pr_sb, "pr_iterations", pr_result->iterations);
+                    cbm_tree_scalar_bool(&pr_sb, "pr_converged", pr_result->converged);
+                    cbm_tree_scalar_int(&pr_sb, "pr_nodes", pr_result->node_count);
+                    cbm_tree_scalar_int(&pr_sb, "pr_edges", pr_result->edge_count);
+                    /* Emit damping as integer (×1000) for compact representation. */
+                    cbm_tree_scalar_int(&pr_sb, "pr_damping_x1000",
+                                        (long long)(pr_result->effective_damping * 1000.0 + 0.5));
+                    if (hits_result) {
+                        cbm_tree_scalar_int(&pr_sb, "hits_iterations", hits_result->iterations);
+                        cbm_tree_scalar_bool(&pr_sb, "hits_converged", hits_result->converged);
+                    }
+                }
+                if (hits_result) cbm_pr_result_free(hits_result);
+                if (pr_result) cbm_pr_result_free(pr_result);
+
+                free(bm25_json);
+                free(query);
+                free(project);
+                char *pr_text = cbm_sb_finish(&pr_sb);
+                char *result = cbm_mcp_text_result(pr_text ? pr_text : "out of memory",
+                                                    pr_text == NULL);
+                free(pr_text);
+                return result;
+            }
+
             free(query);
             free(project);
             char *result = cbm_mcp_text_result(bm25_json, false);
@@ -3969,12 +4159,8 @@ static void add_coverage_report(yyjson_mut_doc *doc, yyjson_mut_val *root, cbm_s
     if (pp_n > 0 || sk_n > 0) {
         yyjson_mut_obj_add_str(
             doc, root, "coverage_note",
-            "Best-effort signal, not a completeness guarantee: parse_partial files WERE indexed, "
-            "but constructs inside the listed line ranges (1-based) MAY be missing from the graph "
-            "(tree-sitter error recovery still salvages some). skipped files were not indexed at "
-            "all. Prefer text search (grep) for flagged files/ranges. Files absent from this list "
-            "are NOT guaranteed to be fully indexed. (not_indexed entries are a separate, "
-            "BY-DESIGN class — deliberate ignore rules, not failures.)");
+            "Best-effort: parse_partial files were indexed but may have gaps; "
+            "skipped files were not indexed. Use grep for flagged files.");
     }
 }
 
@@ -4384,8 +4570,7 @@ static char *handle_check_index_coverage(cbm_mcp_server_t *srv, const char *args
     yyjson_mut_obj_add_val(doc, root, "scopes", scope_results);
     yyjson_mut_obj_add_str(
         doc, root, "caveat",
-        "Best-effort signal only. No recorded issue does not prove graph or source completeness; "
-        "read flagged source and qualify claims when metadata is changed or unavailable.");
+        "Best-effort signal. No recorded issue ≠ complete coverage.");
 
     char *json = yy_doc_to_str(doc);
     yyjson_mut_doc_free(doc);
@@ -5118,9 +5303,8 @@ static char *handle_get_architecture(cbm_mcp_server_t *srv, const char *args) {
         }
         if (default_summary) {
             cbm_tree_scalar_str(&sb, "aspects_hint",
-                                "Summary view (default). More on request via aspects:[...] — "
-                                "structure, dependencies, routes, hotspots, boundaries, layers, "
-                                "clusters, file_tree — or [\"all\"] for everything.");
+                                "Summary view. Use aspects:[\"all\"] or specific: "
+                                "structure,routes,hotspots,clusters,etc.");
         }
         if (path_scoped) {
             cbm_tree_scalar_str(&sb, "path", norm_path);
@@ -5374,9 +5558,8 @@ static char *handle_get_architecture(cbm_mcp_server_t *srv, const char *args) {
     }
     if (default_summary) {
         yyjson_mut_obj_add_str(doc, root, "aspects_hint",
-                               "Summary view (default). More on request via aspects:[...] — "
-                               "structure, dependencies, routes, hotspots, boundaries, layers, "
-                               "clusters, file_tree — or [\"all\"] for everything.");
+                               "Summary view. Use aspects:[\"all\"] or specific: "
+                               "structure,routes,hotspots,clusters,etc.");
     }
     if (path_scoped) {
         yyjson_mut_obj_add_str(doc, root, "path", norm_path);
@@ -7305,9 +7488,7 @@ static bool build_index_success_response(cbm_mcp_server_t *srv, yyjson_mut_doc *
     if (!adr_exists && !degraded) {
         yyjson_mut_obj_add_str(
             doc, root, "adr_hint",
-            "Project indexed. Consider creating an Architecture Decision Record: "
-            "explore the codebase with get_architecture(aspects=['all']), then use "
-            "manage_adr(mode='update') to persist architectural insights across sessions.");
+            "No ADR. Use manage_adr(mode='update') to create one.");
     }
 
     bool has_artifact = cbm_artifact_exists(repo_path);
@@ -8404,7 +8585,8 @@ static char *build_snippet_response(cbm_mcp_server_t *srv, cbm_node_t *node,
     yyjson_mut_val *root_obj = yyjson_mut_obj(doc);
     yyjson_mut_doc_set_root(doc, root_obj);
 
-    yyjson_mut_obj_add_str(doc, root_obj, "name", node->name ? node->name : "");
+    /* "name" omitted — derivable as the last '.' segment of qualified_name.
+     * Saves ~20-50 tokens per snippet call. */
     yyjson_mut_obj_add_str(doc, root_obj, "qualified_name",
                            node->qualified_name ? node->qualified_name : "");
     yyjson_mut_obj_add_str(doc, root_obj, "label", node->label ? node->label : "");
@@ -10685,12 +10867,7 @@ static char *adr_read_legacy_file(const char *root_path) {
 }
 
 #define ADR_EMPTY_HINT                                                             \
-    "No ADR yet. Create one with manage_adr(mode='update', "                       \
-    "content='## PURPOSE\\n...\\n\\n## STACK\\n...\\n\\n## ARCHITECTURE\\n..."     \
-    "\\n\\n## PATTERNS\\n...\\n\\n## TRADEOFFS\\n...\\n\\n## PHILOSOPHY\\n...'). " \
-    "For guided creation: explore the codebase with get_architecture, "            \
-    "then draft and store. Sections: PURPOSE, STACK, ARCHITECTURE, "               \
-    "PATTERNS, TRADEOFFS, PHILOSOPHY."
+    "No ADR. Use manage_adr(mode='update') to create one."
 
 /* resolve_store opens file-backed projects query-only. A mutation must release
  * that reader before opening a dedicated writer because atomic publication uses

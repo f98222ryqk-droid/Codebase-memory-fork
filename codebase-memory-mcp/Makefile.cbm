@@ -40,7 +40,7 @@ IS_GCC := $(shell echo | $(CC) -dM -E - 2>/dev/null | grep -q '__GNUC__' && ! ec
 GCC_ONLY_FLAGS :=
 ifeq ($(IS_GCC),yes)
 GCC_ONLY_FLAGS := -Wno-format-truncation -Wno-unused-result \
-                  -Wno-stringop-truncation -Wno-alloc-size-larger-than
+	-Wno-stringop-truncation -Wno-alloc-size-larger-than
 endif
 
 # -Wdate-time: with -Werror, any use of __DATE__/__TIME__/__TIMESTAMP__ fails the
@@ -48,15 +48,15 @@ endif
 # on every compile (see the local patch in vendored/mimalloc/src/options.c) —
 # once removed, it must not creep back through a new call site.
 CFLAGS_COMMON = -std=c11 -D_DEFAULT_SOURCE -D_GNU_SOURCE -Wall -Wextra -Werror \
-                -Wno-unused-parameter -Wno-sign-compare -Wdate-time \
-                $(GCC_ONLY_FLAGS) \
-                -Isrc -Ivendored -Ivendored/sqlite3 \
-                -Ivendored/mimalloc/include \
-                -I$(CBM_DIR) -I$(TS_INCLUDE)
+	-Wno-unused-parameter -Wno-sign-compare -Wdate-time \
+	$(GCC_ONLY_FLAGS) \
+	-Isrc -Ivendored -Ivendored/sqlite3 \
+	-Ivendored/mimalloc/include \
+	-I$(CBM_DIR) -I$(TS_INCLUDE)
 
 CXXFLAGS_COMMON = -std=c++14 -Wall -Wextra -Werror \
-                  -Wno-unused-parameter \
-                  -I$(CBM_DIR) -I$(TS_INCLUDE)
+	-Wno-unused-parameter \
+	-I$(CBM_DIR) -I$(TS_INCLUDE)
 
 # Test seams are OPT-IN, never opt-out. Some suites drive behaviour that only a
 # test should be able to ask for (fork an orphan the watchdog must reap, publish
@@ -108,7 +108,7 @@ CFLAGS_TSAN = $(CFLAGS_COMMON) $(EDITOR_TEST_DEFINES) $(KOTLIN_DEDUP_TEST_DEFINE
 	$(CALL_REFERENCE_LOOKUP_TEST_DEFINE) $(INCREMENTAL_TEST_DEFINE) \
 	-g -O1 $(TSAN_SANITIZE)
 CXXFLAGS_TSAN = $(CXXFLAGS_COMMON) -g -O1 \
-                $(TSAN_SANITIZE)
+	$(TSAN_SANITIZE)
 
 # Windows needs ws2_32 (Winsock), psapi (GetProcessMemoryInfo), shell32
 # (CommandLineToArgvW — the UTF-8 argv path in main.c, #423/#20), and
@@ -127,7 +127,7 @@ WIN32_LIBS :=
 # wrappers; its deallocating paths check mi_is_in_heap_region so a CRT-owned
 # pointer can never reach mi_free (#424).
 MIMALLOC_WRAP_SYMS := malloc calloc realloc free strdup strndup _msize \
-                      _aligned_malloc _aligned_free
+	_aligned_malloc _aligned_free
 MIMALLOC_WRAP_FLAGS :=
 ifeq ($(IS_MINGW),yes)
 MIMALLOC_WRAP_FLAGS := $(foreach sym,$(MIMALLOC_WRAP_SYMS),-Wl,--wrap=$(sym))
@@ -239,8 +239,8 @@ LSP_SRCS = $(CBM_DIR)/lsp_all.c
 # an ODR mismatch that under-reads the by-value struct copy. Explicit because this
 # Makefile does not use compiler auto-dependency (-MMD) generation.
 LSP_UNITY_DEPS = $(CBM_DIR)/lsp_all.c \
-                 $(wildcard $(CBM_DIR)/lsp/*.c $(CBM_DIR)/lsp/*.h \
-                            $(CBM_DIR)/lsp/generated/*.c $(CBM_DIR)/*.h)
+	$(wildcard $(CBM_DIR)/lsp/*.c $(CBM_DIR)/lsp/*.h \
+	$(CBM_DIR)/lsp/generated/*.c $(CBM_DIR)/*.h)
 
 # Tree-sitter runtime
 TS_RUNTIME_SRC = $(CBM_DIR)/ts_runtime.c
@@ -337,7 +337,7 @@ PIPELINE_SRCS = \
 SIMHASH_SRCS = src/simhash/minhash.c
 
 # Semantic embedding module
-SEMANTIC_SRCS = src/semantic/semantic.c src/semantic/ast_profile.c src/semantic/rotsq.c
+SEMANTIC_SRCS = src/semantic/semantic.c src/semantic/ast_profile.c src/semantic/rotsq.c src/semantic/pagerank.c
 
 # nomic-embed-code pretrained vectors (assembler blob)
 UNIXCODER_BLOB_SRC = vendored/nomic/code_vectors_blob.S
@@ -406,14 +406,14 @@ ifeq ($(IS_MINGW),yes)
 MIMALLOC_OVERRIDE_DEFINE := -DMI_MALLOC_OVERRIDE=1
 endif
 MIMALLOC_CFLAGS = -std=c11 -O2 -w \
-                  -Ivendored/mimalloc/include \
-                  -Ivendored/mimalloc/src \
-                  -DMI_OVERRIDE=1 \
-                  $(MIMALLOC_OVERRIDE_DEFINE)
+	-Ivendored/mimalloc/include \
+	-Ivendored/mimalloc/src \
+	-DMI_OVERRIDE=1 \
+	$(MIMALLOC_OVERRIDE_DEFINE)
 MIMALLOC_CFLAGS_TEST = -std=c11 -g -O1 -w \
-                       -Ivendored/mimalloc/include \
-                       -Ivendored/mimalloc/src \
-                       -DMI_OVERRIDE=0
+	-Ivendored/mimalloc/include \
+	-Ivendored/mimalloc/src \
+	-DMI_OVERRIDE=0
 
 # sqlite3 (vendored amalgamation — compiled ourselves for ASan instrumentation)
 # SQLITE_ENABLE_FTS5: enables the FTS5 full-text search extension used by the
@@ -429,9 +429,9 @@ MIMALLOC_CFLAGS_TEST = -std=c11 -g -O1 -w \
 SQLITE3_OMIT_FLAGS = -DSQLITE_OMIT_LOAD_EXTENSION
 SQLITE3_SRC = vendored/sqlite3/sqlite3.c
 SQLITE3_CFLAGS = -std=c11 -O2 -w -DSQLITE_DQS=0 -DSQLITE_THREADSAFE=1 -DSQLITE_ENABLE_FTS5 \
-                 $(SQLITE3_OMIT_FLAGS)
+	$(SQLITE3_OMIT_FLAGS)
 SQLITE3_CFLAGS_TEST = -std=c11 -g -O1 -w -DSQLITE_DQS=0 -DSQLITE_THREADSAFE=1 -DSQLITE_ENABLE_FTS5 \
-                      $(SQLITE3_OMIT_FLAGS)
+	$(SQLITE3_OMIT_FLAGS)
 
 # TRE regex (vendored, Windows only — POSIX uses system <regex.h>)
 TRE_SRC = vendored/tre/tre_all.c
@@ -444,7 +444,7 @@ YYJSON_SRC = vendored/yyjson/yyjson.c
 PROD_SRCS = $(FOUNDATION_SRCS) $(STORE_SRCS) $(CYPHER_SRCS) $(MCP_SRCS) $(DAEMON_SRCS) $(DISCOVER_SRCS) $(GRAPH_BUFFER_SRCS) $(PIPELINE_SRCS) $(SIMHASH_SRCS) $(SEMANTIC_SRCS) $(TRACES_SRCS) $(WATCHER_SRCS) $(GIT_SRCS) $(CLI_SRCS) $(UI_SRCS) $(YYJSON_SRC) \
 	$(WORKTREE_SRCS) $(BLAST_RADIUS_SRCS) $(CROSS_SERVICE_SRCS) $(INCREMENTAL_PARSE_SRCS) $(HYBRID_RETRIEVAL_SRCS)
 EXISTING_C_SRCS = $(EXTRACTION_SRCS) $(LSP_SRCS) $(TS_RUNTIME_SRC) \
-                  $(GRAMMAR_SRCS) $(AC_LZ4_SRCS) $(ZSTD_SRCS) $(SQLITE_WRITER_SRC)
+	$(GRAMMAR_SRCS) $(AC_LZ4_SRCS) $(ZSTD_SRCS) $(SQLITE_WRITER_SRC)
 
 # Project headers, as prerequisites for the targets built in one compiler
 # invocation from sources (test-runner, test-repro-runner, test-runner-tsan,
@@ -458,7 +458,7 @@ EXISTING_C_SRCS = $(EXTRACTION_SRCS) $(LSP_SRCS) $(TS_RUNTIME_SRC) \
 # own explicit dep lists (LSP_UNITY_DEPS, TS_RUNTIME_DEPS), and globbing tens of
 # thousands of grammar headers would cost more than it protects.
 PROJECT_HDRS = $(wildcard src/*.h src/*/*.h src/*/*/*.h $(CBM_DIR)/*.h $(CBM_DIR)/lsp/*.h tests/*.h \
-               tests/repro/*.h)
+	tests/repro/*.h)
 
 # ── Test sources ─────────────────────────────────────────────────
 
@@ -679,9 +679,9 @@ BUILD_DIR = build/c
 # Grammar + tree-sitter runtime: compiled without -Werror (upstream code has warnings)
 GRAMMAR_CFLAGS = -std=c11 -D_DEFAULT_SOURCE -O2 -w -I$(CBM_DIR) -I$(TS_INCLUDE) -I$(TS_SRC)
 GRAMMAR_CFLAGS_TEST = -std=c11 -D_DEFAULT_SOURCE -g -O1 -w -I$(CBM_DIR) -I$(TS_INCLUDE) -I$(TS_SRC) \
-                      $(SANITIZE)
+	$(SANITIZE)
 GRAMMAR_CFLAGS_TSAN = -std=c11 -D_DEFAULT_SOURCE -g -O1 -w -I$(CBM_DIR) -I$(TS_INCLUDE) -I$(TS_SRC) \
-                      $(TSAN_SANITIZE)
+	$(TSAN_SANITIZE)
 
 # Object files for grammars + ts_runtime + lsp_all + preprocessor
 GRAMMAR_OBJS_TEST = $(patsubst $(CBM_DIR)/%.c,$(BUILD_DIR)/%.o,$(GRAMMAR_SRCS))
@@ -754,7 +754,7 @@ $(BUILD_DIR)/tsan_mimalloc.o: $(MIMALLOC_SRC) | $(BUILD_DIR)
 # build because the object was considered up to date. Depend on the included
 # sources AND on this Makefile so a flag change rebuilds too.
 $(BUILD_DIR)/prod_mimalloc.o: $(MIMALLOC_SRC) $(wildcard vendored/mimalloc/src/*.c) \
-                              $(wildcard vendored/mimalloc/include/*.h) Makefile.cbm | $(BUILD_DIR)
+	$(wildcard vendored/mimalloc/include/*.h) Makefile.cbm | $(BUILD_DIR)
 	$(CC) $(MIMALLOC_CFLAGS) -c -o $@ $<
 
 # sqlite3 object files (vendored amalgamation)
@@ -840,10 +840,10 @@ OBJS_VENDORED_TSAN = $(MIMALLOC_OBJ_TSAN) $(SQLITE3_OBJ_TSAN) $(TRE_OBJ_TSAN) $(
 
 $(BUILD_DIR)/test-runner: $(ALL_TEST_SRCS) $(PROD_SRCS) $(EXTRACTION_SRCS) $(AC_LZ4_SRCS) $(ZSTD_SRCS) $(SQLITE_WRITER_SRC) $(OBJS_VENDORED_TEST) $(PROJECT_HDRS) | $(BUILD_DIR)
 	$(CC) $(CFLAGS_TEST) -Itests -Itests/repro -o $@ \
-		$(ALL_TEST_SRCS) $(PROD_SRCS) \
-		$(EXTRACTION_SRCS) $(AC_LZ4_SRCS) $(ZSTD_SRCS) $(SQLITE_WRITER_SRC) \
-		$(OBJS_VENDORED_TEST) \
-		$(LDFLAGS_TEST)
+	$(ALL_TEST_SRCS) $(PROD_SRCS) \
+	$(EXTRACTION_SRCS) $(AC_LZ4_SRCS) $(ZSTD_SRCS) $(SQLITE_WRITER_SRC) \
+	$(OBJS_VENDORED_TEST) \
+	$(LDFLAGS_TEST)
 
 test: $(BUILD_DIR)/test-runner
 	cd $(CURDIR) && $(BUILD_DIR)/test-runner
@@ -859,7 +859,7 @@ test-par: $(BUILD_DIR)/test-runner
 TEST_SUITES ?=
 test-focused: $(BUILD_DIR)/test-runner
 	@test -n "$(strip $(TEST_SUITES))" || \
-		(echo "TEST_SUITES is required for test-focused"; exit 2)
+	(echo "TEST_SUITES is required for test-focused"; exit 2)
 	cd $(CURDIR) && $(BUILD_DIR)/test-runner $(TEST_SUITES)
 
 # ── Cumulative bug-reproduction runner (RED board by design, non-gating) ──
@@ -868,10 +868,10 @@ test-focused: $(BUILD_DIR)/test-runner
 # still reproduced (the expected state); bug-repro.yml surfaces it as a board.
 $(BUILD_DIR)/test-repro-runner: $(TEST_REPRO_SRCS) $(PROD_SRCS) $(EXTRACTION_SRCS) $(AC_LZ4_SRCS) $(ZSTD_SRCS) $(SQLITE_WRITER_SRC) $(OBJS_VENDORED_TEST) $(PROJECT_HDRS) | $(BUILD_DIR)
 	$(CC) $(CFLAGS_TEST) -Itests -o $@ \
-		$(TEST_REPRO_SRCS) $(PROD_SRCS) \
-		$(EXTRACTION_SRCS) $(AC_LZ4_SRCS) $(ZSTD_SRCS) $(SQLITE_WRITER_SRC) \
-		$(OBJS_VENDORED_TEST) \
-		$(LDFLAGS_TEST)
+	$(TEST_REPRO_SRCS) $(PROD_SRCS) \
+	$(EXTRACTION_SRCS) $(AC_LZ4_SRCS) $(ZSTD_SRCS) $(SQLITE_WRITER_SRC) \
+	$(OBJS_VENDORED_TEST) \
+	$(LDFLAGS_TEST)
 
 test-repro: $(BUILD_DIR)/test-repro-runner
 	cd $(CURDIR) && bash tests/repro/repro_script_summary.sh
@@ -907,8 +907,8 @@ test-repro: $(BUILD_DIR)/test-repro-runner
 #     workers), now fixed with atomics in log.c. Excluding the suite is what
 #     had hidden it.
 TEST_TSAN_SUITES ?= mem slab_alloc parallel worker_pool watcher httpd pipeline \
-                    diagnostics mcp mcp_mutation_guard subprocess daemon daemon_application \
-                    daemon_runtime daemon_ipc daemon_frontend
+	diagnostics mcp mcp_mutation_guard subprocess daemon daemon_application \
+	daemon_runtime daemon_ipc daemon_frontend
 # halt_on_error: a race is a bug, stop at the first one.
 #
 # report_thread_leaks=0: this disables TSan's thread-HYGIENE check only —
@@ -928,15 +928,15 @@ TSAN_OPTIONS ?= halt_on_error=1:report_thread_leaks=0
 
 $(BUILD_DIR)/test-runner-tsan: $(ALL_TEST_SRCS) $(PROD_SRCS) $(EXTRACTION_SRCS) $(AC_LZ4_SRCS) $(ZSTD_SRCS) $(SQLITE_WRITER_SRC) $(OBJS_VENDORED_TSAN) $(PROJECT_HDRS) | $(BUILD_DIR)
 	$(CC) $(CFLAGS_TSAN) -Itests -Itests/repro -o $@ \
-		$(ALL_TEST_SRCS) $(PROD_SRCS) \
-		$(EXTRACTION_SRCS) $(AC_LZ4_SRCS) $(ZSTD_SRCS) $(SQLITE_WRITER_SRC) \
-		$(OBJS_VENDORED_TSAN) \
-		$(LDFLAGS_TSAN)
+	$(ALL_TEST_SRCS) $(PROD_SRCS) \
+	$(EXTRACTION_SRCS) $(AC_LZ4_SRCS) $(ZSTD_SRCS) $(SQLITE_WRITER_SRC) \
+	$(OBJS_VENDORED_TSAN) \
+	$(LDFLAGS_TSAN)
 
 test-tsan: $(BUILD_DIR)/test-runner-tsan
 	@echo "ThreadSanitizer workers: 4"
 	cd $(CURDIR) && CBM_WORKERS=4 TSAN_OPTIONS="$(TSAN_OPTIONS)" \
-		$(BUILD_DIR)/test-runner-tsan $(TEST_TSAN_SUITES)
+	$(BUILD_DIR)/test-runner-tsan $(TEST_TSAN_SUITES)
 
 # Real-binary POSIX lifecycle smoke. The endpoint is deliberately account-wide;
 # an explicit Make invocation requires a clean rendezvous and fails rather than
@@ -1007,10 +1007,10 @@ $(BUILD_DIR)/.build-config: build-config-check | $(BUILD_DIR)
 
 $(BUILD_DIR)/codebase-memory-mcp: $(MAIN_SRC) $(PROD_SRCS) $(EXTRACTION_SRCS) $(AC_LZ4_SRCS) $(ZSTD_SRCS) $(SQLITE_WRITER_SRC) $(OBJS_VENDORED_PROD) $(BUILD_DIR)/.build-config $(PROJECT_HDRS) | $(BUILD_DIR)
 	$(CC) $(CFLAGS_PROD) -o $@ \
-		$(MAIN_SRC) $(PROD_SRCS) \
-		$(EXTRACTION_SRCS) $(AC_LZ4_SRCS) $(ZSTD_SRCS) $(SQLITE_WRITER_SRC) \
-		$(OBJS_VENDORED_PROD) \
-		$(LDFLAGS)
+	$(MAIN_SRC) $(PROD_SRCS) \
+	$(EXTRACTION_SRCS) $(AC_LZ4_SRCS) $(ZSTD_SRCS) $(SQLITE_WRITER_SRC) \
+	$(OBJS_VENDORED_PROD) \
+	$(LDFLAGS)
 
 cbm: $(BUILD_DIR)/codebase-memory-mcp
 	@echo "Built: $(BUILD_DIR)/codebase-memory-mcp"
@@ -1032,11 +1032,11 @@ embed: frontend
 
 cbm-with-ui: embed $(OBJS_VENDORED_PROD)
 	$(CC) $(CFLAGS_PROD) -o $(BUILD_DIR)/codebase-memory-mcp \
-		$(MAIN_SRC) $(PROD_SRCS_WITH_ASSETS) \
-		$(EXTRACTION_SRCS) $(AC_LZ4_SRCS) $(ZSTD_SRCS) $(SQLITE_WRITER_SRC) \
-		$(OBJS_VENDORED_PROD) \
-		$(wildcard $(BUILD_DIR)/embedded/embed_*.o) \
-		$(LDFLAGS)
+	$(MAIN_SRC) $(PROD_SRCS_WITH_ASSETS) \
+	$(EXTRACTION_SRCS) $(AC_LZ4_SRCS) $(ZSTD_SRCS) $(SQLITE_WRITER_SRC) \
+	$(OBJS_VENDORED_PROD) \
+	$(wildcard $(BUILD_DIR)/embedded/embed_*.o) \
+	$(LDFLAGS)
 	@echo "Built with UI: $(BUILD_DIR)/codebase-memory-mcp"
 
 clean-c: export BUILD_DIR := $(BUILD_DIR)
@@ -1058,9 +1058,9 @@ SYSROOT_FLAG = $(if $(SYSROOT),-isysroot $(SYSROOT),)
 
 # Our source files (excluding vendored, grammars, tree-sitter runtime)
 LINT_SRCS = $(FOUNDATION_SRCS) $(STORE_SRCS) $(CYPHER_SRCS) $(MCP_SRCS) $(DAEMON_SRCS) \
-            $(DISCOVER_SRCS) $(GRAPH_BUFFER_SRCS) $(PIPELINE_SRCS) $(SIMHASH_SRCS) $(SEMANTIC_SRCS) \
-            $(TRACES_SRCS) $(WATCHER_SRCS) $(CLI_SRCS) $(EXTRACTION_SRCS) $(AC_LZ4_SRCS) \
-            $(ZSTD_SRCS) $(SQLITE_WRITER_SRC) $(MAIN_SRC)
+	$(DISCOVER_SRCS) $(GRAPH_BUFFER_SRCS) $(PIPELINE_SRCS) $(SIMHASH_SRCS) $(SEMANTIC_SRCS) \
+	$(TRACES_SRCS) $(WATCHER_SRCS) $(CLI_SRCS) $(EXTRACTION_SRCS) $(AC_LZ4_SRCS) \
+	$(ZSTD_SRCS) $(SQLITE_WRITER_SRC) $(MAIN_SRC)
 LINT_HDRS = $(wildcard src/**/*.h src/*.h $(CBM_DIR)/*.h)
 LINT_TEST_SRCS = $(ALL_TEST_SRCS)
 
@@ -1073,21 +1073,21 @@ lint-tidy:
 lint-cppcheck:
 	@echo "=== cppcheck ==="
 	@$(CPPCHECK) --enable=warning,style,performance,portability \
-		--std=c11 --language=c \
-		--suppressions-list=.cppcheck \
-		--error-exitcode=1 \
-		--inline-suppr \
-		--quiet \
-		--suppress=varFuncNullUB \
-		--suppress=intToPointerCast \
-		--suppress=unusedStructMember \
-		--suppress=nullPointerOutOfMemory \
-		--suppress=nullPointerArithmeticOutOfMemory \
-		--suppress=ctunullpointerOutOfMemory \
-		--suppress='nullPointer:internal/cbm/sqlite_writer.c' \
-		-Isrc -Ivendored -Ivendored/sqlite3 \
-		-I$(CBM_DIR) -I$(TS_INCLUDE) \
-		$(LINT_SRCS)
+	--std=c11 --language=c \
+	--suppressions-list=.cppcheck \
+	--error-exitcode=1 \
+	--inline-suppr \
+	--quiet \
+	--suppress=varFuncNullUB \
+	--suppress=intToPointerCast \
+	--suppress=unusedStructMember \
+	--suppress=nullPointerOutOfMemory \
+	--suppress=nullPointerArithmeticOutOfMemory \
+	--suppress=ctunullpointerOutOfMemory \
+	--suppress='nullPointer:internal/cbm/sqlite_writer.c' \
+	-Isrc -Ivendored -Ivendored/sqlite3 \
+	-I$(CBM_DIR) -I$(TS_INCLUDE) \
+	$(LINT_SRCS)
 
 # clang-format: formatting check (config in .clang-format, dry-run = no changes)
 lint-format:
@@ -1101,13 +1101,13 @@ lint-format:
 lint-no-suppress:
 	@echo "=== NOLINT check ==="
 	@if grep -rn 'NOLINT' src/ internal/cbm/*.c internal/cbm/*.h 2>/dev/null \
-		| grep -v vendored \
-		| grep -v 'NOLINT(misc-no-recursion)' \
-		| grep -v 'recursion_whitelist.h'; then \
-		echo "ERROR: Banned NOLINT comment found in source code."; \
-		echo "Only NOLINT(misc-no-recursion) is allowed, and only for whitelisted functions."; \
-		echo "See src/foundation/recursion_whitelist.h for the whitelist."; \
-		exit 1; \
+	| grep -v vendored \
+	| grep -v 'NOLINT(misc-no-recursion)' \
+	| grep -v 'recursion_whitelist.h'; then \
+	echo "ERROR: Banned NOLINT comment found in source code."; \
+	echo "Only NOLINT(misc-no-recursion) is allowed, and only for whitelisted functions."; \
+	echo "See src/foundation/recursion_whitelist.h for the whitelist."; \
+	exit 1; \
 	fi
 	@echo "  Checking NOLINT(misc-no-recursion) against whitelist..."
 	@scripts/check-nolint-whitelist.sh
@@ -1150,10 +1150,10 @@ DIAG_LLVM_BIN ?= /opt/homebrew/opt/llvm/bin
 diag:
 	@echo "=== diagnostic lane: $(shell $(DIAG_LLVM_BIN)/clang --version | head -1) ==="
 	$(MAKE) -f Makefile.cbm build/diag/test-runner \
-		CC=$(DIAG_LLVM_BIN)/clang CXX=$(DIAG_LLVM_BIN)/clang++ BUILD_DIR=build/diag \
-		SANITIZE="-fsanitize=address,undefined -fno-omit-frame-pointer -fno-optimize-sibling-calls"
+	CC=$(DIAG_LLVM_BIN)/clang CXX=$(DIAG_LLVM_BIN)/clang++ BUILD_DIR=build/diag \
+	SANITIZE="-fsanitize=address,undefined -fno-omit-frame-pointer -fno-optimize-sibling-calls"
 	ASAN_OPTIONS="detect_stack_use_after_return=1:strict_string_checks=1:detect_stack_use_after_scope=1" \
-		./build/diag/test-runner
+	./build/diag/test-runner
 
 # ── macOS leak detection ─────────────────────────────────────────
 # LeakSanitizer is ON by default under ASan on Linux, so the Linux test leg
@@ -1173,9 +1173,9 @@ LSAN_SUITES ?=
 test-lsan:
 	@echo "=== macOS leak lane: $(shell $(LSAN_LLVM_BIN)/clang --version | head -1) ==="
 	$(MAKE) -f Makefile.cbm build/lsan/test-runner \
-		CC=$(LSAN_LLVM_BIN)/clang CXX=$(LSAN_LLVM_BIN)/clang++ BUILD_DIR=build/lsan
+	CC=$(LSAN_LLVM_BIN)/clang CXX=$(LSAN_LLVM_BIN)/clang++ BUILD_DIR=build/lsan
 	cd $(CURDIR) && ASAN_OPTIONS="detect_leaks=1:halt_on_error=1" \
-		./build/lsan/test-runner $(LSAN_SUITES)
+	./build/lsan/test-runner $(LSAN_SUITES)
 
 # Path-sensitive memory analysis: leak paths, null derefs, uninitialized reads.
 # Non-gating: triage findings against the code (this lane's first run produced
@@ -1184,7 +1184,7 @@ LINT_MEM_CHECKS = -*,clang-analyzer-unix.Malloc,clang-analyzer-unix.MallocSizeof
 lint-mem:
 	@echo "=== clang-analyzer memory lane (non-gating; triage, don't suppress) ==="
 	@printf '%s\n' $(LINT_SRCS) | xargs -P 10 -I{} $(CLANG_TIDY) --quiet \
-		--checks='$(LINT_MEM_CHECKS)' {} -- $(CFLAGS_COMMON) $(SYSROOT_FLAG) 2>/dev/null; true
+	--checks='$(LINT_MEM_CHECKS)' {} -- $(CFLAGS_COMMON) $(SYSROOT_FLAG) 2>/dev/null; true
 
 # Gating variant: identical run, but vendored-tree diagnostics are excluded
 # (analyzer diagnostics bypass --header-filter by design; this mirrors the
@@ -1201,8 +1201,8 @@ lint-mem:
 lint-mem-ci:
 	@echo "=== clang-analyzer memory gate ==="
 	@printf '%s\n' $(LINT_SRCS) | xargs -P 4 -I{} $(CLANG_TIDY) --quiet \
-		--checks='$(LINT_MEM_CHECKS)' {} -- $(CFLAGS_COMMON) $(SYSROOT_FLAG) 2>/dev/null \
-		| python3 scripts/lint-mem-gate.py
+	--checks='$(LINT_MEM_CHECKS)' {} -- $(CFLAGS_COMMON) $(SYSROOT_FLAG) 2>/dev/null \
+	| python3 scripts/lint-mem-gate.py
 
 # ── Security audit (6 layers) ────────────────────────────────────
 
