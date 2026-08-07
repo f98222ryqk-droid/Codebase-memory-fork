@@ -52,7 +52,8 @@ CFLAGS_COMMON = -std=c11 -D_DEFAULT_SOURCE -D_GNU_SOURCE -Wall -Wextra -Werror \
                 $(GCC_ONLY_FLAGS) \
                 -Isrc -Ivendored -Ivendored/sqlite3 \
                 -Ivendored/mimalloc/include \
-                -I$(CBM_DIR) -I$(TS_INCLUDE)
+                -I$(CBM_DIR) -I$(TS_INCLUDE) \
+                $(CFLAGS_EXTRA)
 
 CXXFLAGS_COMMON = -std=c++14 -Wall -Wextra -Werror \
                   -Wno-unused-parameter \
@@ -99,8 +100,8 @@ CALL_REFERENCE_LOOKUP_TEST_DEFINE = -DCBM_CALL_REFERENCE_LOOKUP_TEST_API=1
 INCREMENTAL_TEST_DEFINE = -DCBM_INCREMENTAL_TEST_API=1
 CFLAGS_TEST = $(CFLAGS_COMMON) $(EDITOR_TEST_DEFINES) $(SANITIZED_DEFINE) \
 	$(KOTLIN_DEDUP_TEST_DEFINE) $(CALL_REFERENCE_LOOKUP_TEST_DEFINE) \
-	$(INCREMENTAL_TEST_DEFINE) -g -O1 $(SANITIZE)
-CXXFLAGS_TEST = $(CXXFLAGS_COMMON) $(SANITIZED_DEFINE) -g -O1 $(SANITIZE) $(CXX_STDLIB_FLAGS)
+	$(INCREMENTAL_TEST_DEFINE) -g -O0 $(SANITIZE)
+CXXFLAGS_TEST = $(CXXFLAGS_COMMON) $(SANITIZED_DEFINE) -g -O0 $(SANITIZE) $(CXX_STDLIB_FLAGS)
 
 # TSan (can't combine with ASan)
 TSAN_SANITIZE = -fsanitize=thread -fno-omit-frame-pointer
@@ -175,9 +176,9 @@ endif
 # instead of the system libstdc++ (scripts/msan.sh overrides both vars).
 CXX_STDLIB ?= -lstdc++
 CXX_STDLIB_FLAGS ?=
-LDFLAGS = -lm $(CXX_STDLIB) -lpthread -lz $(WIN32_LIBS) $(STATIC_FLAGS) $(MIMALLOC_WRAP_FLAGS) $(ELF_HARDENING_FLAGS)
-LDFLAGS_TEST = -lm $(CXX_STDLIB) -lpthread -lz $(SANITIZE) $(WIN32_LIBS) $(MIMALLOC_WRAP_FLAGS) $(ELF_HARDENING_FLAGS)
-LDFLAGS_TSAN = -lm $(CXX_STDLIB) -lpthread -lz $(TSAN_SANITIZE) $(WIN32_LIBS) $(MIMALLOC_WRAP_FLAGS) $(ELF_HARDENING_FLAGS)
+LDFLAGS = -lm $(CXX_STDLIB) -lpthread -lz $(WIN32_LIBS) $(STATIC_FLAGS) $(MIMALLOC_WRAP_FLAGS) $(ELF_HARDENING_FLAGS) $(LDFLAGS_EXTRA)
+LDFLAGS_TEST = -lm $(CXX_STDLIB) -lpthread -lz $(SANITIZE) $(WIN32_LIBS) $(MIMALLOC_WRAP_FLAGS) $(ELF_HARDENING_FLAGS) $(LDFLAGS_EXTRA)
+LDFLAGS_TSAN = -lm $(CXX_STDLIB) -lpthread -lz $(TSAN_SANITIZE) $(WIN32_LIBS) $(MIMALLOC_WRAP_FLAGS) $(ELF_HARDENING_FLAGS) $(LDFLAGS_EXTRA)
 
 # ── Source files ─────────────────────────────────────────────────
 
@@ -717,7 +718,7 @@ $(BUILD_DIR)/ts_runtime.o: $(TS_RUNTIME_DEPS) | $(BUILD_DIR)
 	$(CC) $(GRAMMAR_CFLAGS_TEST) -c -o $@ $<
 
 $(BUILD_DIR)/lsp_all.o: $(LSP_UNITY_DEPS) | $(BUILD_DIR)
-	$(CC) $(GRAMMAR_CFLAGS_TEST) $(SANITIZE) -c -o $@ $<
+	$(CC) $(filter-out -O1 -O2,$(GRAMMAR_CFLAGS_TEST)) -O0 $(SANITIZE) -c -o $@ $<
 
 $(BUILD_DIR)/preprocessor.o: $(CBM_DIR)/preprocessor.cpp | $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS_TEST) -w -I$(CBM_DIR)/vendored -c -o $@ $<
@@ -729,7 +730,7 @@ $(BUILD_DIR)/tsan_ts_runtime.o: $(TS_RUNTIME_DEPS) | $(BUILD_DIR)
 	$(CC) $(GRAMMAR_CFLAGS_TSAN) -c -o $@ $<
 
 $(BUILD_DIR)/tsan_lsp_all.o: $(LSP_UNITY_DEPS) | $(BUILD_DIR)
-	$(CC) $(GRAMMAR_CFLAGS_TSAN) -c -o $@ $<
+	$(CC) $(filter-out -O1 -O2,$(GRAMMAR_CFLAGS_TSAN)) -O0 -c -o $@ $<
 
 $(BUILD_DIR)/tsan_preprocessor.o: $(CBM_DIR)/preprocessor.cpp | $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS_TSAN) -w -I$(CBM_DIR)/vendored -c -o $@ $<
@@ -959,7 +960,7 @@ $(BUILD_DIR)/prod_ts_runtime.o: $(TS_RUNTIME_DEPS) | $(BUILD_DIR)
 	$(CC) $(GRAMMAR_CFLAGS) -c -o $@ $<
 
 $(BUILD_DIR)/prod_lsp_all.o: $(LSP_UNITY_DEPS) | $(BUILD_DIR)
-	$(CC) $(GRAMMAR_CFLAGS) -c -o $@ $<
+	$(CC) $(filter-out -O1 -O2,$(GRAMMAR_CFLAGS)) -O0 -c -o $@ $<
 
 $(BUILD_DIR)/prod_preprocessor.o: $(CBM_DIR)/preprocessor.cpp | $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS_PROD) -w -I$(CBM_DIR)/vendored -c -o $@ $<
